@@ -87,7 +87,7 @@ export const gmailCallback = async (req, res) => {
     } else {
       const { error } = await supabase.from("gmail_accounts").insert({
         ...payload,
-        daily_limit: 40,
+        daily_limit: 20,
       });
       if (error) {
         console.error("DB ERROR:", error);

@@ -53,8 +53,8 @@ export const startScheduler = async () => {
         const { data: recipients } = await supabase
           .from("recipients")
           .select("*")
-          .eq("assigned_gmail_account_id", account.id)
           .eq("status", "pending")
+          .eq("assigned_gmail_account_id", account.id)
           .limit(BATCH_SIZE);
 
         if (!recipients.length) continue;
@@ -65,7 +65,8 @@ export const startScheduler = async () => {
         await supabase
           .from("recipients")
           .update({ status: "processing" })
-          .in("id", ids);
+          .in("id", ids)
+          .eq("status", "pending");
 
         // create batch
         const { data: batch } = await supabase

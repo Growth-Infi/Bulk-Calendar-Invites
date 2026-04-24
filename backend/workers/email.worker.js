@@ -33,48 +33,73 @@ const worker = new Worker(
   async (job) => {
     const { batch_id } = job.data;
 
-    const { data: batch } = await supabase
+    const { data: batch, error: fetchError } = await supabase
       .from("event_batches")
-      .select("*")
+      .select(
+        `
+      *,
+      campaign:campaign_id (*),
+      account:gmail_account_id (*),
+      recipients:batch_recipients (
+        recipient_id,
+        recipients ( email )
+      )
+    `,
+      )
       .eq("id", batch_id)
       .single();
+    if (fetchError || !batch) throw new Error("Batch data not found");
 
-    const { data: campaign } = await supabase
-      .from("campaigns")
-      .select("*")
-      .eq("id", batch.campaign_id)
-      .single();
+    const { account, campaign } = batch;
+    const emails = batch.recipients.map((r) => r.recipients.email);
+    const recipient_ids = batch.recipients.map((r) => r.recipient_id);
+    if (!account || account.status !== "active") {
+      console.warn(
+        `🛑 Account ${account?.email} is ${account?.status}. Marking batch as failed and exiting.`,
+      );
 
-    const { data: account } = await supabase
-      .from("gmail_accounts")
-      .select("*")
-      .eq("id", batch.gmail_account_id)
-      .single();
+      await supabase
+        .from("event_batches")
+        .update({ status: "failed" })
+        .eq("id", batch_id);
 
-    const { data: mappings } = await supabase
-      .from("batch_recipients")
-      .select("recipient_id")
-      .eq("batch_id", batch_id);
-
-    const recipient_ids = mappings.map((m) => m.recipient_id);
-
-    const { data: recipients } = await supabase
-      .from("recipients")
-      .select("email")
-      .in("id", recipient_ids);
-
-    const emails = recipients.map((r) => r.email);
-
-    const success = await supabase.rpc("increment_account_sent_safe", {
-      account_id: account.id,
-    });
-
-    if (!success) {
-      console.error("Daily limit reached for email - ", account.email);
+      await supabase
+        .from("recipients")
+        .update({
+          status: "pending",
+          assigned_gmail_account_id: null,
+        })
+        .in("id", recipient_ids);
+      return;
     }
-    try {
-      const eventId = await createCalendarEvent(account, campaign, emails);
 
+    try {
+      console.log({
+        start: campaign.start_time,
+        end: campaign.end_time,
+        tz: campaign.timezone,
+      });
+      const eventId = await createCalendarEvent(account, campaign, emails);
+      const { data: success, error: rpcError } = await supabase.rpc(
+        "increment_account_sent_safe",
+        {
+          account_id: account.id,
+          amount: emails.length,
+        },
+      );
+
+      if (!success || rpcError) {
+        // This means the event was sent, but we've hit/exceeded our limit
+        console.warn(
+          `⚠️ Limit reached for ${account.email}. Tagging account for review.`,
+        );
+
+        // Set status to 'paused' so the scheduler skips it in the next loop
+        await supabase
+          .from("gmail_accounts")
+          .update({ status: "paused" })
+          .eq("id", account.id);
+      }
       await supabase
         .from("event_batches")
         .update({
@@ -92,23 +117,34 @@ const worker = new Worker(
         throw err; // retry via BullMQ
       }
 
-      // permanent failure
+      const isAccountError =
+        err.response?.status === 401 || err.code === "AUTH_ERROR";
+
       await supabase
         .from("event_batches")
-        .update({
-          status: "failed",
-        })
+        .update({ status: "failed" })
         .eq("id", batch_id);
 
-      await supabase
-        .from("recipients")
-        .update({
-          status: "failed",
-          error: err.message,
-        })
-        .in("id", recipient_ids);
+      if (isAccountError) {
+        await supabase
+          .from("recipients")
+          .update({
+            status: "pending",
+            assigned_gmail_account_id: null,
+          })
+          .in("id", recipient_ids);
 
-      return;
+        // Optionally pause the bad account automatically
+        await supabase
+          .from("gmail_accounts")
+          .update({ status: "blocked" })
+          .eq("id", account.id);
+      } else {
+        await supabase
+          .from("recipients")
+          .update({ status: "failed", error: err.message })
+          .in("id", recipient_ids);
+      }
     }
   },
   { connection },
@@ -122,7 +158,13 @@ worker.on("error", (err) => {
 });
 
 worker.on("failed", (job, err) => {
-  console.error(`❌ Job ${job.id} failed:`, err.message);
+  console.error(
+    `❌ Job ${job.id} permanently failed after all retries:`,
+    err.message,
+  );
+  // const { batch_id } = job.data;
+  // Final safety net: Release recipients so they aren't stuck in 'processing' forever
+  // await supabase.rpc("cleanup_failed_batch", { target_batch_id: batch_id });
 });
 
 worker.on("completed", (job) => {

@@ -1,0 +1,61 @@
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+
+.env
+.env.*
+!.env.example   # keep a sample env file
+
+# Backend specific envs
+backend/.env
+backend/.env.*
+
+# Frontend specific envs
+frontend/.env
+frontend/.env.*
+
+dist/
+build/
+.next/
+out/
+coverage/
+
+# Backend builds
+backend/dist/
+backend/build/
+
+# Frontend builds
+frontend/dist/
+frontend/build/
+
+logs/
+*.log
+
+.DS_Store
+Thumbs.db
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+*.tsbuildinfo
+
+.cache/
+.temp/
+.tmp/
+
+# =========================
+# Optional: Lock files
+# (Keep them for reproducible builds — recommended)
+# =========================
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml

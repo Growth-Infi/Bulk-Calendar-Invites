@@ -34,12 +34,12 @@ export const createCalendarEvent = async (account, campaign, emails) => {
     description: campaign.description,
 
     start: {
-      dateTime: new Date(campaign.start_time).toISOString(),
-      timeZone: "Asia/Kolkata",
+      dateTime: campaign.start_time,
+      timeZone: campaign.timezone,
     },
     end: {
-      dateTime: new Date(campaign.end_time).toISOString(),
-      timeZone: "Asia/Kolkata",
+      dateTime: campaign.end_time,
+      timeZone: campaign.timezone,
     },
 
     attendees: emails.map((e) => ({ email: e })),

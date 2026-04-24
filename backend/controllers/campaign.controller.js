@@ -98,6 +98,7 @@ export const createCampaign = async (req, res) => {
       meeting_link,
       start_time,
       end_time,
+      timezone,
       description,
       emails,
     } = req.body;
@@ -108,6 +109,7 @@ export const createCampaign = async (req, res) => {
       !meeting_link ||
       !start_time ||
       !end_time ||
+      !timezone ||
       !emails?.length
     ) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -123,6 +125,7 @@ export const createCampaign = async (req, res) => {
           meeting_link,
           start_time,
           end_time,
+          timezone,
           description,
           status: "draft",
         },
