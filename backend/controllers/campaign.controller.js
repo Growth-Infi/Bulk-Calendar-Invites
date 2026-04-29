@@ -101,6 +101,7 @@ export const createCampaign = async (req, res) => {
       timezone,
       description,
       emails,
+      sender_ids,
     } = req.body;
 
     if (
@@ -110,7 +111,8 @@ export const createCampaign = async (req, res) => {
       !start_time ||
       !end_time ||
       !timezone ||
-      !emails?.length
+      !emails?.length ||
+      !sender_ids?.length
     ) {
       return res.status(400).json({ error: "Missing required fields" });
     }
@@ -141,6 +143,12 @@ export const createCampaign = async (req, res) => {
     }));
 
     await supabase.from("recipients").insert(rows);
+    await supabase.from("campaign_senders").insert(
+      sender_ids.map((id) => ({
+        campaign_id: campaign.id,
+        gmail_account_id: id,
+      })),
+    );
 
     res.json(campaign);
   } catch (err) {

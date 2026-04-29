@@ -16,42 +16,56 @@ export const createCalendarEvent = async (account, campaign, emails) => {
       : null,
   });
 
+  // This ensures that if getAccessToken() refreshes the token, we catch it.
   oauth2Client.on("tokens", async (tokens) => {
+    const updateData = {
+      access_token: tokens.access_token,
+      expiry_date: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+    };
+
+    // Google only sends a refresh_token on the first auth.
+    // But if it IS present in the refresh response, save it
+    if (tokens.refresh_token) {
+      updateData.refresh_token = tokens.refresh_token;
+    }
+
     await supabase
       .from("gmail_accounts")
-      .update({
-        access_token: tokens.access_token,
-        expiry_date: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      })
+      .update(updateData)
       .eq("id", account.id);
   });
 
-  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+  try {
+    // 3. Trigger the refresh if needed
+    await oauth2Client.getAccessToken();
 
-  const event = {
-    summary: campaign.event_title,
-    location: campaign.meeting_link,
-    description: campaign.description,
+    const calendar = google.calendar({ version: "v3", auth: oauth2Client });
 
-    start: {
-      dateTime: campaign.start_time,
-      timeZone: campaign.timezone,
-    },
-    end: {
-      dateTime: campaign.end_time,
-      timeZone: campaign.timezone,
-    },
+    const event = {
+      summary: campaign.event_title,
+      location: campaign.meeting_link,
+      description: campaign.description,
+      start: {
+        dateTime: campaign.start_time,
+        timeZone: campaign.timezone,
+      },
+      end: {
+        dateTime: campaign.end_time,
+        timeZone: campaign.timezone,
+      },
+      attendees: emails.map((e) => ({ email: e })),
+      guestsCanSeeOtherGuests: false,
+    };
 
-    attendees: emails.map((e) => ({ email: e })),
+    const res = await calendar.events.insert({
+      calendarId: "primary",
+      requestBody: event,
+      sendUpdates: "all",
+    });
 
-    guestsCanSeeOtherGuests: false,
-  };
-
-  const res = await calendar.events.insert({
-    calendarId: "primary",
-    requestBody: event,
-    sendUpdates: "all",
-  });
-
-  return res.data.id;
+    return res.data.id;
+  } catch (error) {
+    console.error("Error creating calendar event:", error);
+    throw error;
+  }
 };

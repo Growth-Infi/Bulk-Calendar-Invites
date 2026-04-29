@@ -50,13 +50,49 @@ export const startScheduler = async () => {
           continue;
         }
 
+        const { data: unassigned } = await supabase
+          .from("recipients")
+          .select(
+            `
+              *,
+              campaign:campaign_id (
+                status
+              ),
+             campaign_senders!inner(gmail_account_id)
+            `,
+          )
+          .is("assigned_gmail_account_id", null)
+          .eq("status", "pending")
+          .eq("campaign.status", "running")
+          .eq("campaign_senders.gmail_account_id", account.id)
+          .limit(BATCH_SIZE);
+        if (unassigned?.length) {
+          const ids = unassigned.map((r) => r.id);
+
+          await supabase
+            .from("recipients")
+            .update({ assigned_gmail_account_id: account.id })
+            .in("id", ids);
+
+          console.log(
+            `♻️ Reassigned ${ids.length} recipients to ${account.email}`,
+          );
+        }
+
         const { data: recipients } = await supabase
           .from("recipients")
-          .select("*")
+          .select(
+            `
+             *,
+             campaign:campaign_id (
+              status
+                )
+              `,
+          )
           .eq("status", "pending")
           .eq("assigned_gmail_account_id", account.id)
+          .eq("campaign.status", "running")
           .limit(BATCH_SIZE);
-
         if (!recipients.length) continue;
 
         // LOCK all
@@ -113,7 +149,7 @@ export const startScheduler = async () => {
           })
           .eq("id", account.id);
         console.log(
-          `Queued 1 email for ${account.email}, next in ${Math.round(
+          `Queued ${recipients.length} email for ${account.email}, next in ${Math.round(
             delay / 1000,
           )}s`,
         );

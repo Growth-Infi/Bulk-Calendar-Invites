@@ -1,16 +1,19 @@
 import { supabase } from "../lib/supabase.js";
 
 export const assignRecipients = async (campaign_id, user_id) => {
-  const { data: accounts, error: accError } = await supabase
-    .from("gmail_accounts")
-    .select("*")
-    .eq("user_id", user_id)
-    .eq("status", "active");
-
+  const { data, error: accError } = await supabase
+    .from("campaign_senders")
+    .select(
+      `
+  gmail_account:gmail_account_id (*)
+`,
+    )
+    .eq("campaign_id", campaign_id);
   if (accError) {
     console.error("Accounts fetch error:", accError);
     return;
   }
+  const accounts = data.map((d) => d.gmail_account);
 
   if (!accounts || accounts.length === 0) {
     throw new Error("No Gmail accounts found for this user");
