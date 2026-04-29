@@ -10,6 +10,9 @@ const isRetryableError = (error) => {
   const status = error.response?.status || error.code;
   const reason = error.response?.data?.error?.errors?.[0]?.reason;
 
+  // NOT DONE if 403: Rate Limit Exceeded rateLimitExceeded errors can return either 403 or 429 error
+  // codes—currently they are functionally similar and should be responded to in the same way,
+  // by using exponential backoff. Additionally make sure your app follows best practices from manage quotas.
   const retryableStatuses = [429, 500, 502, 503, 504];
   const retryableCodes = ["ECONNRESET", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND"];
   const retryableReasons = [
@@ -53,6 +56,24 @@ const worker = new Worker(
     const { account, campaign } = batch;
     const emails = batch.recipients.map((r) => r.recipients.email);
     const recipient_ids = batch.recipients.map((r) => r.recipient_id);
+
+    if (campaign.status !== "running") {
+      console.log(` Campaign paused. Skipping batch ${batch_id}`);
+
+      await supabase
+        .from("event_batches")
+        .update({ status: "cancelled" })
+        .eq("id", batch_id);
+
+      await supabase
+        .from("recipients")
+        .update({
+          status: "pending",
+        })
+        .in("id", recipient_ids);
+
+      return;
+    }
     if (!account || account.status !== "active") {
       console.warn(
         `🛑 Account ${account?.email} is ${account?.status}. Marking batch as failed and exiting.`,
@@ -60,7 +81,7 @@ const worker = new Worker(
 
       await supabase
         .from("event_batches")
-        .update({ status: "failed" })
+        .update({ status: "cancelled" })
         .eq("id", batch_id);
 
       await supabase
@@ -112,20 +133,31 @@ const worker = new Worker(
         .from("recipients")
         .update({ status: "invited" })
         .in("id", recipient_ids);
+
+      const { count } = await supabase
+        .from("recipients")
+        .select("*", { count: "exact", head: true })
+        .eq("campaign_id", campaign.id)
+        .in("status", ["pending", "processing"]);
+
+      if (count === 0) {
+        await supabase
+          .from("campaigns")
+          .update({ status: "completed" })
+          .eq("id", campaign.id);
+
+        console.log(`🎉 Campaign ${campaign.id} completed`);
+      }
     } catch (err) {
       if (isRetryableError(err)) {
         throw err; // retry via BullMQ
       }
 
-      const isAccountError =
-        err.response?.status === 401 || err.code === "AUTH_ERROR";
+      const isAuthError =
+        err.response?.status === 401 ||
+        err.response?.data?.error?.message === "Invalid Credentials";
 
-      await supabase
-        .from("event_batches")
-        .update({ status: "failed" })
-        .eq("id", batch_id);
-
-      if (isAccountError) {
+      if (isAuthError) {
         await supabase
           .from("recipients")
           .update({
@@ -134,17 +166,33 @@ const worker = new Worker(
           })
           .in("id", recipient_ids);
 
-        // Optionally pause the bad account automatically
         await supabase
           .from("gmail_accounts")
-          .update({ status: "blocked" })
+          .update({ status: "needs_reauth" })
           .eq("id", account.id);
+
+        console.warn(`🔴 Account ${account.email} blocked due to auth error`);
       } else {
+        //  Permanent failure (bad emails, invalid request, etc.)
+        const status = err.response?.status || err.code;
+        const customErrorMsg = status + " - " + err.message;
+
         await supabase
           .from("recipients")
-          .update({ status: "failed", error: err.message })
+          .update({
+            status: "failed",
+            error: customErrorMsg,
+          })
           .in("id", recipient_ids);
+
+        console.warn(`❌ Permanent failure for batch ${batch_id}`);
       }
+
+      // mark batch failed
+      await supabase
+        .from("event_batches")
+        .update({ status: "failed" })
+        .eq("id", batch_id);
     }
   },
   { connection },
