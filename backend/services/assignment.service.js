@@ -13,6 +13,8 @@ export const assignRecipients = async (campaign_id, user_id) => {
     console.error("Accounts fetch error:", accError);
     return;
   }
+  // console.log("campaign_senders raw:", data);
+
   const accounts = data.map((d) => d.gmail_account);
 
   if (!accounts || accounts.length === 0) {
@@ -31,7 +33,6 @@ export const assignRecipients = async (campaign_id, user_id) => {
 
   // console.log("Accounts:", accounts);
   // console.log("Recipients:", recipients);
-
   const updates = recipients.map((r, i) => ({
     id: r.id,
     email: r.email,
@@ -39,7 +40,7 @@ export const assignRecipients = async (campaign_id, user_id) => {
     campaign_id: campaign_id,
   }));
 
-  const chunkSize = 500;
+  const chunkSize = 200;
   for (let i = 0; i < updates.length; i += chunkSize) {
     const chunk = updates.slice(i, i + chunkSize);
 

@@ -95,7 +95,8 @@ export const gmailCallback = async (req, res) => {
       }
     }
 
-    res.send(` Gmail connected Success: ${email}`);
+    // res.send(` Gmail connected Success: ${email}`);
+    res.redirect(`${process.env.FRONTEND_URL}/emailSenders`);
   } catch (err) {
     console.error("FULL ERROR:", err);
     console.error("ERROR RESPONSE:", err.response?.data);

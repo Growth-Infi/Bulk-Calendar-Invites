@@ -55,6 +55,14 @@ export const createCalendarEvent = async (account, campaign, emails) => {
       },
       attendees: emails.map((e) => ({ email: e })),
       guestsCanSeeOtherGuests: false,
+
+      // reminders: {
+      //   useDefault: false,
+      //   overrides: [
+      //     { method: "email", minutes: 30 }, // email reminder 30 min before
+      //     { method: "popup", minutes: 10 }, // popup reminder 10 min before
+      //   ],
+      // },
     };
 
     const res = await calendar.events.insert({

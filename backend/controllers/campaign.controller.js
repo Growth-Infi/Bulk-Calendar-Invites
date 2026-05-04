@@ -10,9 +10,16 @@ export const getCampaigns = async (req, res) => {
       return res.status(400).json({ error: "user_id is required" });
     }
 
+    // We select the campaign fields + two virtual "count" fields from recipients
     const { data, error } = await supabase
       .from("campaigns")
-      .select("*")
+      .select(
+        `
+        *,
+        total_count:recipients(count),
+        sent_count:recipients(count).filter(status.eq.invited)
+      `,
+      )
       .eq("user_id", user_id)
       .order("created_at", { ascending: false });
 
@@ -20,7 +27,14 @@ export const getCampaigns = async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
-    return res.json(data);
+    // Format the data so the frontend gets simple numbers
+    const formattedData = data.map((campaign) => ({
+      ...campaign,
+      total_recipients: campaign.total_count?.[0]?.count || 0,
+      sent_count: campaign.sent_count?.[0]?.count || 0,
+    }));
+
+    return res.json(formattedData);
   } catch (err) {
     console.error("Get Campaigns Error:", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -39,11 +53,15 @@ export const getCampaignById = async (req, res) => {
 
     const { data, error } = await supabase
       .from("campaigns")
-      .select("*")
+      .select(
+        `
+     *,
+    recipients(count)
+     `,
+      )
       .eq("id", id)
       .eq("user_id", user_id)
       .single();
-
     if (error || !data) {
       return res.status(404).json({ error: "Campaign not found" });
     }
@@ -72,7 +90,6 @@ export const getCampaignRecipients = async (req, res) => {
         email,
         status,
         error,
-        sent_at,
         assigned_gmail_account_id`,
       )
       .eq("campaign_id", id)
@@ -142,13 +159,26 @@ export const createCampaign = async (req, res) => {
       email: email.trim(),
     }));
 
-    await supabase.from("recipients").insert(rows);
-    await supabase.from("campaign_senders").insert(
-      sender_ids.map((id) => ({
-        campaign_id: campaign.id,
-        gmail_account_id: id,
-      })),
-    );
+    const { error: recError } = await supabase.from("recipients").insert(rows);
+
+    if (recError) {
+      console.error("Recipients insert error:", recError);
+      throw recError;
+    }
+
+    const { error: senderError } = await supabase
+      .from("campaign_senders")
+      .insert(
+        sender_ids.map((id) => ({
+          campaign_id: campaign.id,
+          gmail_account_id: id,
+        })),
+      );
+
+    if (senderError) {
+      console.error("Campaign senders insert error:", senderError);
+      throw senderError;
+    }
 
     res.json(campaign);
   } catch (err) {
@@ -168,24 +198,22 @@ export const startCampaign = async (req, res) => {
       });
     }
 
-    const { data: campaign, error: fetchError } = await supabase
+    const { data: campaign, error: updateError } = await supabase
       .from("campaigns")
-      .select("*")
+      .update({ status: "running" })
       .eq("id", id)
+      // .eq("status", "draft") // Atomic check: only update if it was a draft
+      .select()
       .single();
 
-    if (fetchError || !campaign) {
-      return res.status(404).json({ error: "Campaign not found" });
-    }
+    if (!campaign)
+      return res
+        .status(404)
+        .json({ error: "Campaign not found or already running" });
 
     // if (campaign.status === "running") {
     //   return res.status(400).json({ error: "Campaign already running" });
     // }
-
-    const { error: updateError } = await supabase
-      .from("campaigns")
-      .update({ status: "running" })
-      .eq("id", id);
 
     if (updateError) {
       return res.status(500).json({ error: updateError.message });
