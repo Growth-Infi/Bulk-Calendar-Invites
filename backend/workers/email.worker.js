@@ -101,53 +101,28 @@ const worker = new Worker(
         tz: campaign.timezone,
       });
       const eventId = await createCalendarEvent(account, campaign, emails);
+
       const { data: success, error: rpcError } = await supabase.rpc(
-        "increment_account_sent_safe",
+        "complete_email_batch",
         {
-          account_id: account.id,
-          amount: emails.length,
+          p_batch_id: batch_id,
+          p_google_event_id: eventId,
+          p_recipient_ids: recipient_ids,
+          p_account_id: account.id,
+          p_amount: emails.length,
+          p_campaign_id: campaign.id,
         },
       );
 
-      if (!success || rpcError) {
-        // This means the event was sent, but we've hit/exceeded our limit
-        console.warn(
-          `⚠️ Limit reached for ${account.email}. Tagging account for review.`,
-        );
-
-        // Set status to 'paused' so the scheduler skips it in the next loop
-        await supabase
-          .from("gmail_accounts")
-          .update({ status: "paused" })
-          .eq("id", account.id);
+      if (rpcError) throw rpcError;
+      if (!success) {
+        console.error(`❌ Batch ${batch_id} rejected by DB: Limit exceeded.`);
+        // Note: In this rare case, the email was sent but DB didn't update.
+        // The account will likely be paused by the next scheduler loop.
       }
-      await supabase
-        .from("event_batches")
-        .update({
-          google_event_id: eventId,
-          status: "created",
-        })
-        .eq("id", batch_id);
-
-      await supabase
-        .from("recipients")
-        .update({ status: "invited" })
-        .in("id", recipient_ids);
-
-      const { count } = await supabase
-        .from("recipients")
-        .select("*", { count: "exact", head: true })
-        .eq("campaign_id", campaign.id)
-        .in("status", ["pending", "processing"]);
-
-      if (count === 0) {
-        await supabase
-          .from("campaigns")
-          .update({ status: "completed" })
-          .eq("id", campaign.id);
-
-        console.log(`🎉 Campaign ${campaign.id} completed`);
-      }
+      console.log(
+        `✅ Successfully processed batch ${batch_id} for ${account.email}`,
+      );
     } catch (err) {
       if (isRetryableError(err)) {
         throw err; // retry via BullMQ
