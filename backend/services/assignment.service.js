@@ -15,7 +15,9 @@ export const assignRecipients = async (campaign_id, user_id) => {
   }
   // console.log("campaign_senders raw:", data);
 
-  const accounts = data.map((d) => d.gmail_account);
+  const accounts = data
+    .map((d) => d.gmail_account)
+    .filter((a) => a.status === "active");
 
   if (!accounts || accounts.length === 0) {
     throw new Error("No Gmail accounts found for this user");

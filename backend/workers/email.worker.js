@@ -103,7 +103,7 @@ const worker = new Worker(
       const eventId = await createCalendarEvent(account, campaign, emails);
 
       const { data: success, error: rpcError } = await supabase.rpc(
-        "complete_email_batch",
+        "complete_email_batch_v2",
         {
           p_batch_id: batch_id,
           p_google_event_id: eventId,
@@ -150,7 +150,8 @@ const worker = new Worker(
       } else {
         //  Permanent failure (bad emails, invalid request, etc.)
         const status = err.response?.status || err.code;
-        const customErrorMsg = status + " - " + err.message;
+        const googleReason = err.response?.data?.error?.errors?.[0]?.reason;
+        const customErrorMsg = `${status} - ${googleReason || err.message}`;
 
         await supabase
           .from("recipients")
@@ -160,6 +161,11 @@ const worker = new Worker(
           })
           .in("id", recipient_ids);
 
+        // BLOCK that sender mail ???
+        await supabase
+          .from("gmail_accounts")
+          .update({ status: "blocked" })
+          .eq("id", account.id);
         console.warn(`❌ Permanent failure for batch ${batch_id}`);
       }
 
@@ -180,14 +186,23 @@ worker.on("error", (err) => {
   console.error("🔴 Worker connection error:", err);
 });
 
-worker.on("failed", (job, err) => {
+worker.on("failed", async (job, err) => {
   console.error(
     `❌ Job ${job.id} permanently failed after all retries:`,
     err.message,
   );
-  // const { batch_id } = job.data;
-  // Final safety net: Release recipients so they aren't stuck in 'processing' forever
-  // await supabase.rpc("cleanup_failed_batch", { target_batch_id: batch_id });
+
+  const { batch_id } = job.data;
+
+  const { error } = await supabase.rpc("cleanup_failed_batch", {
+    target_batch_id: batch_id,
+  });
+
+  if (error) {
+    console.error("❌ CRITICAL: cleanup_failed_batch also failed:", error);
+  } else {
+    console.log(` Cleaned up stuck recipients for batch ${batch_id}`);
+  }
 });
 
 worker.on("completed", (job) => {

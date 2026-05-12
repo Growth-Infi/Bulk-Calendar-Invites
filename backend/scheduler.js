@@ -5,7 +5,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const MIN_DELAY = 30 * 1000;
 const MAX_DELAY = 90 * 1000;
-const BATCH_SIZE = 20;
+const BATCH_SIZE = 50;
 
 function getRandomDelay() {
   return MIN_DELAY + Math.random() * (MAX_DELAY - MIN_DELAY);
@@ -16,6 +16,28 @@ export const startScheduler = async () => {
 
   while (true) {
     try {
+      const { data: expiredAccounts } = await supabase
+        .from("gmail_accounts")
+        .select("id")
+        .in("status", ["active", "limit_reached"]) // paused are ones paused by user
+        .lte(
+          "window_start",
+          new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        );
+      if (expiredAccounts?.length) {
+        await supabase
+          .from("gmail_accounts")
+          .update({
+            status: "active",
+            sent_today: 0,
+            window_start: new Date().toISOString(),
+          })
+          .in(
+            "id",
+            expiredAccounts.map((a) => a.id),
+          );
+        console.log(`♻️ Reactivated ${expiredAccounts.length} accounts`);
+      }
       const { data: accounts, error } = await supabase
         .from("gmail_accounts")
         .select("*")
@@ -33,28 +55,12 @@ export const startScheduler = async () => {
       for (const account of accounts) {
         const now = new Date();
 
-        // ⏱ Respect delay
+        //  Respect delay
         if (account.next_send_at && new Date(account.next_send_at) > now) {
           continue;
         }
 
-        // 🔄 Reset daily counter
-        const today = new Date().toDateString();
-        const last = account.last_sent_at
-          ? new Date(account.last_sent_at).toDateString()
-          : null;
-
-        if (last !== today) {
-          await supabase
-            .from("gmail_accounts")
-            .update({ sent_today: 0 })
-            .eq("id", account.id);
-          account.sent_today = 0;
-        }
-
-        if (account.sent_today >= account.daily_limit) {
-          continue;
-        }
+        if (account.sent_today >= account.daily_limit) continue;
 
         //  Pick ONE campaign via first recipient
         const { data: firstRecipient } = await supabase
@@ -118,10 +124,9 @@ export const startScheduler = async () => {
         if (remainingLimit <= 0) continue;
         const currentBatchLimit = Math.min(BATCH_SIZE, remainingLimit);
 
-        // 3. ATOMIC LOCK & FETCH (The RPC Replacement)
-        // This replaces the old Step 3 and Step 4
+        //  ATOMIC LOCK & FETCH
         const { data: recipients, error: rpcError } = await supabase.rpc(
-          "lock_recipients_for_batch",
+          "lock_recipients_for_batch_v2",
           {
             p_campaign_id: campaignId,
             p_account_id: account.id,
@@ -149,7 +154,7 @@ export const startScheduler = async () => {
           continue;
         }
 
-        // 🔹 STEP 5: Create batch
+        // Create batch
         const { data: batch, error: batchError } = await supabase
           .from("event_batches")
           .insert({
@@ -165,7 +170,7 @@ export const startScheduler = async () => {
           continue;
         }
 
-        // 🔹 STEP 6: Map recipients
+        //  Map recipients in batch_recipients
         await supabase.from("batch_recipients").insert(
           recipients.map((r) => ({
             batch_id: batch.id,
@@ -173,7 +178,7 @@ export const startScheduler = async () => {
           })),
         );
 
-        // 🔹 STEP 7: Queue job
+        //  Queue job
         await emailQueue.add(
           "create-event",
           {
@@ -185,12 +190,12 @@ export const startScheduler = async () => {
               type: "exponential",
               delay: 3 * 60 * 1000,
             },
-            removeOnComplete: true,
+            removeOnComplete: { count: 100 },
             removeOnFail: false,
           },
         );
 
-        // 🔹 STEP 8: Delay next send
+        // Delay next send
         const delay = getRandomDelay();
         const buffer = 2000;
 

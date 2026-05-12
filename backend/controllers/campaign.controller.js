@@ -4,46 +4,34 @@ import { emailQueue } from "../lib/queue.js";
 
 export const getCampaigns = async (req, res) => {
   try {
-    const { user_id } = req.query;
+    const user_id = req.user.id;
 
     if (!user_id) {
       return res.status(400).json({ error: "user_id is required" });
     }
 
-    // We select the campaign fields + two virtual "count" fields from recipients
-    const { data, error } = await supabase
-      .from("campaigns")
-      .select(
-        `
-        *,
-        total_count:recipients(count),
-        sent_count:recipients(count).filter(status.eq.invited)
-      `,
-      )
-      .eq("user_id", user_id)
-      .order("created_at", { ascending: false });
+    // Call the RPC function
+    const { data, error } = await supabase.rpc("get_campaigns_with_stats", {
+      p_user_id: user_id,
+    });
 
     if (error) {
+      console.error("RPC Error:", error);
       return res.status(500).json({ error: error.message });
     }
 
-    // Format the data so the frontend gets simple numbers
-    const formattedData = data.map((campaign) => ({
-      ...campaign,
-      total_recipients: campaign.total_count?.[0]?.count || 0,
-      sent_count: campaign.sent_count?.[0]?.count || 0,
-    }));
-
-    return res.json(formattedData);
+    // data is already formatted as an array of objects with total_recipients and sent_count
+    return res.json(data);
   } catch (err) {
     console.error("Get Campaigns Error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 };
+
 export const getCampaignById = async (req, res) => {
   try {
     const { id } = req.params;
-    const { user_id } = req.query;
+    const user_id = req.user.id;
 
     if (!id || !user_id) {
       return res.status(400).json({
@@ -90,16 +78,21 @@ export const getCampaignRecipients = async (req, res) => {
         email,
         status,
         error,
-        assigned_gmail_account_id`,
+        assigned_gmail_account_id,
+        gmail_accounts!assigned_gmail_account_id(email)`,
       )
       .eq("campaign_id", id)
       .order("created_at", { ascending: false });
+    // console.log("Data for recipients ", data);
 
     if (error) {
       return res.status(500).json({ error: error.message });
     }
-
-    return res.json(data);
+    const formattedData = data.map((r) => ({
+      ...r,
+      sender_email: r.gmail_accounts?.email || "Not Assigned",
+    }));
+    return res.json(formattedData);
   } catch (err) {
     console.error("Get Campaign Recipients Error:", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -109,7 +102,6 @@ export const getCampaignRecipients = async (req, res) => {
 export const createCampaign = async (req, res) => {
   try {
     const {
-      user_id,
       name,
       event_title,
       meeting_link,
@@ -120,7 +112,7 @@ export const createCampaign = async (req, res) => {
       emails,
       sender_ids,
     } = req.body;
-
+    const user_id = req.user.id;
     if (
       !user_id ||
       !event_title ||
@@ -190,7 +182,7 @@ export const createCampaign = async (req, res) => {
 export const startCampaign = async (req, res) => {
   try {
     const { id } = req.params;
-    const { user_id } = req.body;
+    const user_id = req.user.id;
 
     if (!id || !user_id) {
       return res.status(400).json({
@@ -225,7 +217,6 @@ export const startCampaign = async (req, res) => {
     return res.json({
       message: "Campaign started. Scheduler will handle sending.",
     });
-    return res.json({ message: "Campaign started + jobs queued" });
   } catch (err) {
     console.error("Start Campaign Error:", err);
     return res.status(500).json({ error: "Internal server error" });

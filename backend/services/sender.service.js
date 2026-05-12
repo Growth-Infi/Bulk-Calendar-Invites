@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import { supabase } from "../lib/supabase.js";
+import { encrypt, decrypt } from "../lib/crypto.js";
 
 export const createCalendarEvent = async (account, campaign, emails) => {
   const oauth2Client = new google.auth.OAuth2(
@@ -9,8 +10,8 @@ export const createCalendarEvent = async (account, campaign, emails) => {
   );
 
   oauth2Client.setCredentials({
-    refresh_token: account.refresh_token,
-    access_token: account.access_token,
+    refresh_token: decrypt(account.refresh_token),
+    access_token: decrypt(account.access_token),
     expiry_date: account.expiry_date
       ? new Date(account.expiry_date).getTime()
       : null,
@@ -19,14 +20,14 @@ export const createCalendarEvent = async (account, campaign, emails) => {
   // This ensures that if getAccessToken() refreshes the token, we catch it.
   oauth2Client.on("tokens", async (tokens) => {
     const updateData = {
-      access_token: tokens.access_token,
+      access_token: encrypt(tokens.access_token),
       expiry_date: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
     };
 
     // Google only sends a refresh_token on the first auth.
     // But if it IS present in the refresh response, save it
     if (tokens.refresh_token) {
-      updateData.refresh_token = tokens.refresh_token;
+      updateData.refresh_token = encrypt(tokens.refresh_token);
     }
 
     await supabase
