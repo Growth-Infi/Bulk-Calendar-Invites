@@ -2,12 +2,14 @@ import { createOAuthClient } from "../lib/google.js";
 import { google } from "googleapis";
 import { supabase } from "../lib/supabase.js";
 import { encrypt, decrypt } from "../lib/crypto.js";
+import logger from "../lib/logger.js";
 
 //  Redirect user to Google
 export const connectGmail = (req, res) => {
   const user_id = req.user.id;
 
   if (!user_id) {
+    logger.warn("Missing user_id in connectGmail");
     return res.status(400).send("Missing user_id");
   }
   const oauth2Client = createOAuthClient();
@@ -24,6 +26,8 @@ export const connectGmail = (req, res) => {
     state: user_id,
   });
 
+  logger.info({ userId: user_id }, "Gmail OAuth URL generated");
+
   // res.redirect(url);
   res.json({ url });
 };
@@ -34,6 +38,12 @@ export const disconnectGmailAccount = async (req, res) => {
   const user_id = req.user.id;
 
   if (!id) {
+    logger.warn(
+      {
+        userId: user_id,
+      },
+      "Missing account id in disconnectGmailAccount",
+    );
     return res.status(400).json({
       error: "Account id is required",
     });
@@ -52,12 +62,26 @@ export const disconnectGmailAccount = async (req, res) => {
     .single();
 
   if (fetchError || !account) {
+    logger.warn(
+      {
+        accountId: id,
+        userId: user_id,
+      },
+      "Gmail account not found",
+    );
     return res.status(404).json({
       error: "Gmail account not found",
     });
   }
 
   if (account.status === "deleted") {
+    logger.warn(
+      {
+        accountId: id,
+        userId: user_id,
+      },
+      "Attempted disconnect on already deleted Gmail account",
+    );
     return res.status(400).json({ error: "Account Already Disconnected" });
   }
 
@@ -81,7 +105,16 @@ export const disconnectGmailAccount = async (req, res) => {
     .in("status", ["pending", "processing"]);
 
   if (updateError) {
-    console.error(updateError);
+    logger.error(
+      {
+        err: updateError,
+        accountId: id,
+        userId: user_id,
+      },
+      "Failed resetting recipients after Gmail disconnect",
+    );
+
+    // console.error(updateError);
 
     return res.status(500).json({
       error: updateError.message,
@@ -98,9 +131,17 @@ export const disconnectGmailAccount = async (req, res) => {
       await oauth2Client.revokeToken(decrypt(account.refresh_token)); // SECURE
     }
   } catch (e) {
-    console.warn("Token revoke failed (non-fatal):", e.message);
+    // console.warn("Token revoke failed (non-fatal):", e.message);
+    logger.warn(
+      {
+        err: e,
+        accountId: id,
+      },
+      "Google token revoke failed (non-fatal)",
+    );
   }
 
+  logger.info({ userId: user_id, accountId: id }, "Gmail account disconnected");
   return res.json({
     success: true,
     message: "Gmail account disconnected successfully",
@@ -114,12 +155,21 @@ export const gmailCallback = async (req, res) => {
     const user_id = req.query.state;
 
     if (!code) {
+      logger.warn("OAuth callback missing authorization code");
       return res.status(400).send("Missing code");
     }
     const oauth2Client = createOAuthClient();
 
     // Exchange code for tokens
     const { tokens } = await oauth2Client.getToken(code);
+    logger.info(
+      {
+        userId: user_id,
+        email,
+        hasRefreshToken: !!tokens.refresh_token,
+      },
+      "OAuth token exchange successful",
+    );
 
     oauth2Client.setCredentials(tokens);
 
@@ -132,7 +182,7 @@ export const gmailCallback = async (req, res) => {
 
     const email = userInfo.data.email;
 
-    console.log("Connected Gmail:", email);
+    // console.log("Connected Gmail:", email);
 
     const { data: existing } = await supabase
       .from("gmail_accounts")
@@ -165,25 +215,52 @@ export const gmailCallback = async (req, res) => {
         .eq("id", existing.id);
 
       if (error) {
-        console.error("DB ERROR:", error);
+        logger.error(
+          { err: error },
+          "DB error updating existing Gmail account",
+        );
+
+        // console.error("DB ERROR:", error);
         return res.status(500).send("Error updating account");
       }
+      logger.info(
+        {
+          userId: user_id,
+          email,
+        },
+        "Existing Gmail account updated",
+      );
     } else {
       const { error } = await supabase.from("gmail_accounts").insert({
         ...payload,
         daily_limit: 50,
       });
+
       if (error) {
-        console.error("DB ERROR:", error);
+        // console.error("DB ERROR:", error);
+        logger.error({ err: error }, "DB error saving Gmail account");
         return res.status(500).send("Error saving account");
       }
+      logger.info(
+        {
+          userId: user_id,
+          email,
+        },
+        "New Gmail account connected",
+      );
     }
-
+    logger.info({ userId: user_id, email }, "Gmail account connected");
     // res.send(` Gmail connected Success: ${email}`);
     res.redirect(`${process.env.FRONTEND_URL}/emailSenders`);
   } catch (err) {
-    console.error("FULL ERROR:", err);
-    console.error("ERROR RESPONSE:", err.response?.data);
+    logger.error(
+      {
+        err,
+        userId: user_id,
+      },
+      "Unhandled error in gmailCallback",
+    );
+    // console.error("FULL ERROR:", err);
     res.status(500).send("OAuth failed");
   }
 };
@@ -214,10 +291,23 @@ export const getAccounts = async (req, res) => {
     .neq("status", "deleted");
 
   if (error) {
-    console.error("FETCH ERROR:", error);
+    logger.error(
+      {
+        err: error,
+        userId: user_id,
+      },
+      "DB Failed to fetch Gmail accounts",
+    );
+    // console.error("FETCH ERROR:", error);
     return res.status(500).json({ error });
   }
-
+  logger.info(
+    {
+      userId: user_id,
+      accountsCount: data?.length || 0,
+    },
+    "Fetched Gmail accounts",
+  );
   res.json(data);
 };
 
@@ -258,10 +348,19 @@ export const updateDailyLimit = async (req, res) => {
     .eq("user_id", user_id);
 
   if (error) {
-    console.error("UPDATE ERROR:", error);
+    logger.error({ err: error }, "DB update updateDailyLimit error");
+
+    // console.error("UPDATE ERROR:", error);
     return res.status(500).json({ error: error.message });
   }
-
+  logger.info(
+    {
+      userId: user_id,
+      accountId: id,
+      newLimit: limit,
+    },
+    "Daily limit updated",
+  );
   return res.json({ success: true, message: "Daily limit updated" });
 };
 
@@ -308,16 +407,28 @@ export const updateGmailStatus = async (req, res) => {
       .eq("user_id", user_id);
 
     if (updateError) {
-      console.error(updateError);
+      logger.error(
+        {
+          err: updateError,
+          accountId: id,
+          userId: user_id,
+        },
+        "DB Failed updating Gmail status",
+      );
+
+      // console.error(updateError);
       return res.status(500).json({ error: updateError.message });
     }
 
+    logger.info({ accountId: id, newStatus: status }, "Gmail status updated");
     return res.json({
       success: true,
       message: `Account ${status}`,
     });
   } catch (err) {
-    console.error("Update Gmail Status Error:", err);
+    logger.error({ err: err }, "Unhandled UpdategmailStatus error");
+
+    // console.error("Update Gmail Status Error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 };

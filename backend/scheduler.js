@@ -1,3 +1,4 @@
+import logger from "./lib/logger.js";
 import { emailQueue } from "./lib/queue.js";
 import { supabase } from "./lib/supabase.js";
 
@@ -36,7 +37,11 @@ export const startScheduler = async () => {
             "id",
             expiredAccounts.map((a) => a.id),
           );
-        console.log(`♻️ Reactivated ${expiredAccounts.length} accounts`);
+        // console.log(`♻️ Reactivated ${expiredAccounts.length} accounts`);
+        logger.info(
+          { count: expiredAccounts.length },
+          "Accounts reactivated after 24h window",
+        );
       }
       const { data: accounts, error } = await supabase
         .from("gmail_accounts")
@@ -47,7 +52,8 @@ export const startScheduler = async () => {
         );
 
       if (error) {
-        console.error("Account fetch error:", error);
+        logger.error({ err: error }, "DB call failed - Account fetch error");
+        // console.error("Account fetch error:", error);
         await sleep(2000);
         continue;
       }
@@ -114,9 +120,13 @@ export const startScheduler = async () => {
             .update({ assigned_gmail_account_id: account.id })
             .in("id", ids);
 
-          console.log(
-            `♻️ Reassigned ${ids.length} recipients to ${account.email}`,
+          logger.info(
+            { count: ids.length, account: account.email },
+            "Reassigned null recipients to the account email",
           );
+          // console.log(
+          //   `♻️ Reassigned ${ids.length} recipients to ${account.email}`,
+          // );
         }
 
         const remainingLimit = account.daily_limit - account.sent_today;
@@ -135,10 +145,16 @@ export const startScheduler = async () => {
         );
 
         if (rpcError) {
-          console.error("RPC error:", rpcError);
+          logger.error(
+            { err: rpcError },
+            "RPC call lock_recipients_for_batch_v2 (locking recipeients in batches) error",
+          );
+
+          // console.error("RPC error:", rpcError);
+
           continue;
         }
-        console.log("Response for rpc lock_recipients_for_batch ", recipients);
+        // console.log("Response for rpc lock_recipients_for_batch ", recipients);
 
         // 🔥 THIS FIXES YOUR CRASH
         if (!recipients || recipients.length === 0) {
@@ -150,7 +166,9 @@ export const startScheduler = async () => {
           ...new Set(recipients.map((r) => r.campaign_id)),
         ];
         if (uniqueCampaigns.length > 1) {
-          console.error("❌ Mixed campaigns detected, skipping batch");
+          logger.error(" Mixed campaigns detected, skipping batch");
+
+          // console.error("❌ Mixed campaigns detected, skipping batch");
           continue;
         }
 
@@ -166,7 +184,8 @@ export const startScheduler = async () => {
           .single();
 
         if (batchError || !batch) {
-          console.error("Batch creation failed:", batchError);
+          logger.error({ err: batchError }, "Batch creation failed");
+          // console.error("Batch creation failed:", batchError);
           continue;
         }
 
@@ -205,11 +224,19 @@ export const startScheduler = async () => {
             next_send_at: new Date(Date.now() + delay + buffer),
           })
           .eq("id", account.id);
-
-        console.log(`✅ Batched ${recipients.length} for ${account.email}`);
+        logger.info(
+          {
+            batchId: batch.id,
+            accountEmail: account.email,
+            recipientCount: recipients.length,
+          },
+          "Batch queued and email worker should pickup",
+        );
+        // console.log(`✅ Batched ${recipients.length} for ${account.email}`);
       }
     } catch (error) {
-      console.error("Scheduler error:", error);
+      logger.error({ err: error.message }, "Scheduler loop error");
+      // console.error("Scheduler error:", error);
     }
 
     await sleep(3500);

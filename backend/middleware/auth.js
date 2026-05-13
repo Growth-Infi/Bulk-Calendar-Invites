@@ -4,6 +4,8 @@ export const requireAuth = async (req, res, next) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader?.startsWith("Bearer ")) {
+      console.error("ERROR Middlware - No jwt token found in request ");
+
       return res.status(401).json({
         error: "Unauthorized",
       });
@@ -17,6 +19,8 @@ export const requireAuth = async (req, res, next) => {
     } = await supabase.auth.getUser(token);
 
     if (error || !user) {
+      console.error("FAILED Middlware - Supabase Auth for Jwt token ");
+
       return res.status(401).json({
         error: "Invalid token",
       });

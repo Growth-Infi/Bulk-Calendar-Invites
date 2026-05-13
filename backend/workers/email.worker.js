@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase.js";
 import { createCalendarEvent } from "../services/sender.service.js";
 import { connection } from "../lib/queue.js";
 import { tryCatch, Worker } from "bullmq";
+import logger from "../lib/logger.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -57,9 +58,12 @@ const worker = new Worker(
     const emails = batch.recipients.map((r) => r.recipients.email);
     const recipient_ids = batch.recipients.map((r) => r.recipient_id);
 
-    if (campaign.status !== "running") {
-      console.log(` Campaign paused. Skipping batch ${batch_id}`);
-
+    if (campaign.status == "paused") {
+      // console.log(` Campaign paused. Skipping batch ${batch_id}`);
+      logger.info(
+        { batchId: batch_id, campaignId: campaign.id },
+        "Batch skipped — campaign paused",
+      );
       await supabase
         .from("event_batches")
         .update({ status: "cancelled" })
@@ -75,8 +79,12 @@ const worker = new Worker(
       return;
     }
     if (!account || account.status !== "active") {
-      console.warn(
-        `🛑 Account ${account?.email} is ${account?.status}. Marking batch as failed and exiting.`,
+      // console.warn(
+      //   `🛑 Account ${account?.email} is ${account?.status}. Marking batch as failed and exiting.`,
+      // );
+      logger.info(
+        { batchId: batch_id, account: account.email },
+        "Batch skipped — Sender Account paused",
       );
 
       await supabase
@@ -95,11 +103,11 @@ const worker = new Worker(
     }
 
     try {
-      console.log({
-        start: campaign.start_time,
-        end: campaign.end_time,
-        tz: campaign.timezone,
-      });
+      // console.log({
+      //   start: campaign.start_time,
+      //   end: campaign.end_time,
+      //   tz: campaign.timezone,
+      // });
       const eventId = await createCalendarEvent(account, campaign, emails);
 
       const { data: success, error: rpcError } = await supabase.rpc(
@@ -116,12 +124,21 @@ const worker = new Worker(
 
       if (rpcError) throw rpcError;
       if (!success) {
-        console.error(`❌ Batch ${batch_id} rejected by DB: Limit exceeded.`);
+        // console.error(`❌ Batch ${batch_id} rejected by DB: Limit exceeded.`);
+
+        logger.error(
+          { batchId: batch_id, email: account.email, count: emails.length },
+          " RPC call - complete_email_batch, Batch rejected by DB: Limit exceeded.",
+        );
         // Note: In this rare case, the email was sent but DB didn't update.
         // The account will likely be paused by the next scheduler loop.
       }
-      console.log(
-        `✅ Successfully processed batch ${batch_id} for ${account.email}`,
+      // console.log(
+      //   `✅ Successfully processed batch ${batch_id} for ${account.email}`,
+      // );
+      logger.info(
+        { batchId: batch_id, email: account.email, count: emails.length },
+        "Batch processed successfully",
       );
     } catch (err) {
       if (isRetryableError(err)) {
@@ -146,7 +163,11 @@ const worker = new Worker(
           .update({ status: "needs_reauth" })
           .eq("id", account.id);
 
-        console.warn(`🔴 Account ${account.email} blocked due to auth error`);
+        // console.warn(`🔴 Account ${account.email} blocked due to auth error`);
+        logger.error(
+          { batchId: batch_id, accountId: account.id, email: account.email },
+          "Auth error — account marked needs_reauth",
+        );
       } else {
         //  Permanent failure (bad emails, invalid request, etc.)
         const status = err.response?.status || err.code;
@@ -166,7 +187,11 @@ const worker = new Worker(
           .from("gmail_accounts")
           .update({ status: "blocked" })
           .eq("id", account.id);
-        console.warn(`❌ Permanent failure for batch ${batch_id}`);
+        // console.warn(`❌ Permanent failure for batch ${batch_id}`);
+        logger.error(
+          { batchId: batch_id, status, googleReason, msg: err.message },
+          "Permanent batch failure",
+        );
       }
 
       // mark batch failed
@@ -187,9 +212,14 @@ worker.on("error", (err) => {
 });
 
 worker.on("failed", async (job, err) => {
-  console.error(
-    `❌ Job ${job.id} permanently failed after all retries:`,
-    err.message,
+  // console.error(
+  //   `❌ Job ${job.id} permanently failed after all retries:`,
+  //   err.message,
+  // );
+
+  logger.error(
+    { jobId: job.id, batchId: job.data.batch_id, err: err.message },
+    "Job permanently failed after all retries",
   );
 
   const { batch_id } = job.data;
@@ -199,12 +229,22 @@ worker.on("failed", async (job, err) => {
   });
 
   if (error) {
-    console.error("❌ CRITICAL: cleanup_failed_batch also failed:", error);
+    // console.error("❌ CRITICAL: cleanup_failed_batch also failed:", error);
+    logger.error(
+      { err: error },
+      " CRITICAL: cleanup_failed_batch also failed:",
+    );
   } else {
-    console.log(` Cleaned up stuck recipients for batch ${batch_id}`);
+    logger.info(
+      { jobId: job.id, batchId: job.data.batch_id, err: err.message },
+      "Cleaned up stuck recipients for batch",
+    );
+
+    // console.log(` Cleaned up stuck recipients for batch ${batch_id}`);
   }
 });
 
 worker.on("completed", (job) => {
-  console.log(`✅ Job ${job.id} completed`);
+  // console.log(`✅ Job ${job.id} completed`);
+  logger.info({ jobId: job.id }, "Job completed");
 });
