@@ -1,5 +1,6 @@
 import crypto from "crypto";
-
+import dotenv from "dotenv";
+dotenv.config();
 const ALGO = "aes-256-gcm";
 const KEY = Buffer.from(process.env.ENCRYPTION_KEY, "hex"); // 32-byte hex key
 

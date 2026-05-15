@@ -27,6 +27,7 @@ coverage/
 # Backend builds
 backend/dist/
 backend/build/
+backend/logs/
 
 # Frontend builds
 frontend/dist/

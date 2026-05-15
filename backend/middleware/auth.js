@@ -1,17 +1,26 @@
+import logger from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
+
 export const requireAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
     if (!authHeader?.startsWith("Bearer ")) {
-      console.error("ERROR Middlware - No jwt token found in request ");
+      logger.warn(
+        {
+          method: req.method,
+          url: req.originalUrl,
+          ip: req.ip,
+        },
+        "Missing or malformed authorization header",
+      );
 
       return res.status(401).json({
         error: "Unauthorized",
       });
     }
+
     const token = authHeader.split(" ")[1];
-    // console.log("Got token " + token.slice(10));
 
     const {
       data: { user },
@@ -19,18 +28,34 @@ export const requireAuth = async (req, res, next) => {
     } = await supabase.auth.getUser(token);
 
     if (error || !user) {
-      console.error("FAILED Middlware - Supabase Auth for Jwt token ");
+      logger.warn(
+        {
+          err: error,
+          method: req.method,
+          url: req.originalUrl,
+          ip: req.ip,
+        },
+        "Invalid JWT token",
+      );
 
       return res.status(401).json({
         error: "Invalid token",
       });
     }
+
     req.user = user;
-    console.log("Verified in middleware ✔️ ");
 
     next();
   } catch (err) {
-    console.error(err);
+    logger.error(
+      {
+        err,
+        method: req.method,
+        url: req.originalUrl,
+        ip: req.ip,
+      },
+      "Unhandled error in requireAuth middleware",
+    );
 
     return res.status(500).json({
       error: "Internal server error",

@@ -162,14 +162,6 @@ export const gmailCallback = async (req, res) => {
 
     // Exchange code for tokens
     const { tokens } = await oauth2Client.getToken(code);
-    logger.info(
-      {
-        userId: user_id,
-        email,
-        hasRefreshToken: !!tokens.refresh_token,
-      },
-      "OAuth token exchange successful",
-    );
 
     oauth2Client.setCredentials(tokens);
 
@@ -182,6 +174,14 @@ export const gmailCallback = async (req, res) => {
 
     const email = userInfo.data.email;
 
+    logger.info(
+      {
+        userId: user_id,
+        email,
+        hasRefreshToken: !!tokens.refresh_token,
+      },
+      "OAuth token exchange successful",
+    );
     // console.log("Connected Gmail:", email);
 
     const { data: existing } = await supabase
@@ -256,7 +256,6 @@ export const gmailCallback = async (req, res) => {
     logger.error(
       {
         err,
-        userId: user_id,
       },
       "Unhandled error in gmailCallback",
     );

@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 import { supabase } from "../lib/supabase.js";
 import { encrypt, decrypt } from "../lib/crypto.js";
+import logger from "../lib/logger.js";
 
 export const createCalendarEvent = async (account, campaign, emails) => {
   const oauth2Client = new google.auth.OAuth2(
@@ -30,14 +31,41 @@ export const createCalendarEvent = async (account, campaign, emails) => {
       updateData.refresh_token = encrypt(tokens.refresh_token);
     }
 
-    await supabase
+    logger.info(
+      {
+        accountId: account.id,
+        email: account.email,
+        hasNewRefreshToken: !!tokens.refresh_token,
+      },
+      "Google OAuth tokens refreshed",
+    );
+    const { error: tokenUpdateError } = await supabase
       .from("gmail_accounts")
       .update(updateData)
       .eq("id", account.id);
+
+    if (tokenUpdateError) {
+      logger.error(
+        {
+          err: tokenUpdateError,
+          accountId: account.id,
+          email: account.email,
+        },
+        "DB Failed to persist refreshed OAuth tokens",
+      );
+    }
   });
 
   try {
-    // 3. Trigger the refresh if needed
+    logger.info(
+      {
+        accountId: account.id,
+        email: account.email,
+        campaignId: campaign.id,
+      },
+      "Refreshing Google access token if needed",
+    );
+    //  Trigger the refresh if needed
     await oauth2Client.getAccessToken();
 
     const calendar = google.calendar({ version: "v3", auth: oauth2Client });
@@ -66,15 +94,43 @@ export const createCalendarEvent = async (account, campaign, emails) => {
       // },
     };
 
+    logger.info(
+      {
+        accountId: account.id,
+        email: account.email,
+        campaignId: campaign.id,
+        attendeesCount: emails.length,
+      },
+      "Creating Google Calendar event",
+    );
     const res = await calendar.events.insert({
       calendarId: "primary",
       requestBody: event,
       sendUpdates: "all",
     });
 
+    logger.info(
+      {
+        accountId: account.id,
+        campaignId: campaign.id,
+        googleEventId: res.data.id,
+        attendeesCount: emails.length,
+      },
+      "Google Calendar event created successfully",
+    );
     return res.data.id;
   } catch (error) {
-    console.error("Error creating calendar event:", error);
+    // console.error("Error creating calendar event:", error);
+    logger.error(
+      {
+        err: error,
+        accountId: account.id,
+        email: account.email,
+        campaignId: campaign.id,
+        attendeesCount: emails.length,
+      },
+      "Failed to create Google Calendar event",
+    );
     throw error;
   }
 };

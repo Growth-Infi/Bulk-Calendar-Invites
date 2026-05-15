@@ -44,7 +44,7 @@ export const getCampaigns = async (req, res) => {
     logger.error(
       {
         err,
-        userId,
+        userId: user_id,
       },
       "Unhandled error in getCampaigns",
     );
@@ -63,7 +63,7 @@ export const getCampaignById = async (req, res) => {
       logger.warn(
         {
           campaignId: id,
-          userId,
+          userId: user_id,
         },
         "Missing campaign id or user_id",
       );
@@ -88,7 +88,7 @@ export const getCampaignById = async (req, res) => {
       logger.warn(
         {
           campaignId: id,
-          userId,
+          userId: user_id,
         },
         "Campaign not found",
       );
@@ -97,7 +97,7 @@ export const getCampaignById = async (req, res) => {
     logger.info(
       {
         campaignId: id,
-        userId,
+        userId: user_id,
       },
       "Campaign fetched successfully",
     );
@@ -119,65 +119,47 @@ export const getCampaignById = async (req, res) => {
 export const getCampaignRecipients = async (req, res) => {
   try {
     const { id } = req.params;
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
 
     if (!id) {
       logger.warn("Campaign id missing while fetching recipients");
-      return res.status(400).json({
-        error: "campaign id is required",
-      });
+      return res.status(400).json({ error: "campaign id is required" });
     }
 
-    const { data, error } = await supabase
+    const { data, error, count } = await supabase
       .from("recipients")
       .select(
-        `id,
-        email,
-        status,
-        error,
-        assigned_gmail_account_id,
+        `id, email, status, error, assigned_gmail_account_id,
         gmail_accounts!assigned_gmail_account_id(email)`,
+        { count: "exact" },
       )
       .eq("campaign_id", id)
-      .order("created_at", { ascending: false });
-    // console.log("Data for recipients ", data);
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
 
     if (error) {
       logger.error(
-        {
-          err: error,
-          campaignId: id,
-        },
-        "Campaign controller Failed to fetch campaign recipients",
+        { err: error, campaignId: id },
+        "Failed to fetch campaign recipients",
       );
       return res.status(500).json({ error: error.message });
     }
+
     const formattedData = data.map((r) => ({
       ...r,
       sender_email: r.gmail_accounts?.email || "Not Assigned",
     }));
 
-    logger.info(
-      {
-        campaignId: id,
-        recipientsCount: formattedData.length,
-      },
-      "Recipients fetched successfully",
-    );
-    return res.json(formattedData);
+    return res.json({ data: formattedData, total: count, limit, offset });
   } catch (err) {
-    // console.error("Get Campaign Recipients Error:", err);
     logger.error(
-      {
-        err,
-        campaignId: id,
-        userId: req.user?.id,
-      },
-      "Unhandled error in GetCampaignRecipients",
+      { err, campaignId: req.params.id },
+      "Unhandled error in getCampaignRecipients",
     );
     return res.status(500).json({ error: "Internal server error" });
   }
 };
-
 export const createCampaign = async (req, res) => {
   try {
     const {
@@ -234,7 +216,7 @@ export const createCampaign = async (req, res) => {
     logger.info(
       {
         campaignId: campaign.id,
-        userId,
+        userId: user_id,
       },
       "Campaign created",
     );
@@ -311,7 +293,7 @@ export const startCampaign = async (req, res) => {
       logger.warn(
         {
           campaignId: id,
-          userId,
+          userId: user_id,
         },
         "Missing campaign id or user_id in startCampaign",
       );
@@ -330,10 +312,7 @@ export const startCampaign = async (req, res) => {
 
     if (!campaign) {
       logger.warn(
-        {
-          campaignId: id,
-          userId,
-        },
+        { campaignId: id, userId: user_id },
         "Campaign not found or already running",
       );
       return res
@@ -350,7 +329,7 @@ export const startCampaign = async (req, res) => {
         {
           err: updateError,
           campaignId: id,
-          userId,
+          userId: user_id,
         },
         "Failed to update campaign status to running",
       );
@@ -360,7 +339,7 @@ export const startCampaign = async (req, res) => {
     logger.info(
       {
         campaignId: id,
-        userId,
+        userId: user_id,
       },
       "Starting recipient assignment",
     );
@@ -369,7 +348,7 @@ export const startCampaign = async (req, res) => {
     logger.info(
       {
         campaignId: id,
-        userId,
+        userId: user_id,
       },
       "Campaign started successfully",
     );

@@ -242,3 +242,5 @@ export const startScheduler = async () => {
     await sleep(3500);
   }
 };
+
+startScheduler();

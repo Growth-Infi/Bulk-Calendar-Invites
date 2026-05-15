@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import gmailRoutes from "./routes/gmail.routes.js";
 import campaignRoutes from "./routes/campaign.routes.js";
 import "./config.js";
-import { startScheduler } from "./scheduler.js";
+// import { startScheduler } from "./scheduler.js";
 import cors from "cors";
 import { requestLogger } from "./middleware/requestLogger.js";
 
@@ -35,11 +35,11 @@ app.use(cors());
 app.use("/gmail", authLimiter, gmailRoutes);
 app.use("/campaign", campaignRoutes);
 
-startScheduler();
+// startScheduler();
 app.get("/", (req, res) => {
   res.status(200).json({
-    status: "ok",
-    service: "email-api",
+    status: "ok - GrowthInfi Calendar Invites",
+    service: "GrowthInfi Calendar Invites",
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });

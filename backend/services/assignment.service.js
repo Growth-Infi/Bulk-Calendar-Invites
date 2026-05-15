@@ -1,65 +1,155 @@
+import logger from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
 
 export const assignRecipients = async (campaign_id, user_id) => {
-  const { data, error: accError } = await supabase
-    .from("campaign_senders")
-    .select(
-      `
-  gmail_account:gmail_account_id (*)
-`,
-    )
-    .eq("campaign_id", campaign_id);
-  if (accError) {
-    console.error("Accounts fetch error:", accError);
-    return;
-  }
-  // console.log("campaign_senders raw:", data);
+  try {
+    logger.info(
+      {
+        campaignId: campaign_id,
+        userId: user_id,
+      },
+      "Starting recipient assignment",
+    );
 
-  const accounts = data
-    .map((d) => d.gmail_account)
-    .filter((a) => a.status === "active");
+    const { data, error: accError } = await supabase
+      .from("campaign_senders")
+      .select(
+        `
+        gmail_account:gmail_account_id (*)
+      `,
+      )
+      .eq("campaign_id", campaign_id);
 
-  if (!accounts || accounts.length === 0) {
-    throw new Error("No Gmail accounts found for this user");
-  }
+    if (accError) {
+      logger.error(
+        {
+          err: accError,
+          campaignId: campaign_id,
+          userId: user_id,
+        },
+        "Failed to fetch campaign sender accounts",
+      );
 
-  const { data: recipients, error: recError } = await supabase
-    .from("recipients")
-    .select("*")
-    .eq("campaign_id", campaign_id);
-
-  if (recError) {
-    console.error("Recipients fetch error:", recError);
-    return;
-  }
-
-  // console.log("Accounts:", accounts);
-  // console.log("Recipients:", recipients);
-  const updates = recipients.map((r, i) => ({
-    id: r.id,
-    email: r.email,
-    assigned_gmail_account_id: accounts[i % accounts.length].id,
-    campaign_id: campaign_id,
-  }));
-
-  const chunkSize = 200;
-  for (let i = 0; i < updates.length; i += chunkSize) {
-    const chunk = updates.slice(i, i + chunkSize);
-
-    const { error: upsertError } = await supabase
-      .from("recipients")
-      .upsert(chunk, { onConflict: "id" });
-
-    if (upsertError) {
-      console.error(`Failed at chunk starting at index ${i}:`, upsertError);
-      //  'break' here or continue
-      throw upsertError;
+      throw accError;
     }
 
-    console.log(`Processed chunk: ${i + chunk.length} / ${updates.length}`);
-  }
+    const accounts = data
+      .map((d) => d.gmail_account)
+      .filter((a) => a.status === "active");
 
-  console.log(
-    `✅ ${updates.length} recipients assigned with sender emails in one bulk request!`,
-  );
+    if (!accounts || accounts.length === 0) {
+      logger.warn(
+        {
+          campaignId: campaign_id,
+          userId: user_id,
+        },
+        "No active Gmail accounts found for campaign",
+      );
+
+      throw new Error("No Gmail accounts found for this user");
+    }
+
+    logger.info(
+      {
+        campaignId: campaign_id,
+        activeAccounts: accounts.length,
+      },
+      "Active Gmail accounts fetched",
+    );
+
+    const { data: recipients, error: recError } = await supabase
+      .from("recipients")
+      .select("id,email")
+      .eq("campaign_id", campaign_id);
+
+    if (recError) {
+      logger.error(
+        {
+          err: recError,
+          campaignId: campaign_id,
+        },
+        "Failed to fetch recipients",
+      );
+
+      throw recError;
+    }
+
+    if (!recipients.length) {
+      logger.warn(
+        {
+          campaignId: campaign_id,
+        },
+        "No recipients found for campaign",
+      );
+
+      return;
+    }
+
+    logger.info(
+      {
+        campaignId: campaign_id,
+        recipientsCount: recipients.length,
+      },
+      "Recipients fetched successfully",
+    );
+
+    const updates = recipients.map((r, i) => ({
+      id: r.id,
+      email: r.email,
+      assigned_gmail_account_id: accounts[i % accounts.length].id,
+      campaign_id: campaign_id,
+    }));
+
+    const chunkSize = 200;
+
+    for (let i = 0; i < updates.length; i += chunkSize) {
+      const chunk = updates.slice(i, i + chunkSize);
+
+      const { error: upsertError } = await supabase
+        .from("recipients")
+        .upsert(chunk, { onConflict: "id" });
+
+      if (upsertError) {
+        logger.error(
+          {
+            err: upsertError,
+            campaignId: campaign_id,
+            failedChunkStartIndex: i,
+          },
+          "Failed recipient assignment chunk upsert",
+        );
+
+        throw upsertError;
+      }
+
+      logger.info(
+        {
+          campaignId: campaign_id,
+          processed: i + chunk.length,
+          total: updates.length,
+        },
+        "Recipient assignment chunk processed",
+      );
+    }
+
+    logger.info(
+      {
+        campaignId: campaign_id,
+        assignedRecipients: updates.length,
+        senderAccounts: accounts.length,
+      },
+      "Recipient assignment completed successfully",
+    );
+  } catch (err) {
+    logger.error(
+      {
+        err,
+        campaignId: campaign_id,
+        userId: user_id,
+      },
+      "Unhandled error in assignRecipients",
+    );
+
+    throw err;
+  }
 };
