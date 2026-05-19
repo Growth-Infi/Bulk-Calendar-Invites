@@ -216,7 +216,7 @@ export const startScheduler = async () => {
 
         // Delay next send
         const delay = getRandomDelay();
-        const buffer = 2000;
+        const buffer = 10000;
 
         await supabase
           .from("gmail_accounts")
@@ -239,8 +239,8 @@ export const startScheduler = async () => {
       // console.error("Scheduler error:", error);
     }
 
-    await sleep(3500);
+    await sleep(5000);
   }
 };
 
-startScheduler();
+// startScheduler();

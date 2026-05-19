@@ -9,12 +9,13 @@ import { requestLogger } from "./middleware/requestLogger.js";
 
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-// import "./workers/email.worker.js";
+import "./workers/email.worker.js";
+import { startScheduler } from "./scheduler.js";
 dotenv.config();
 
 const app = express();
 app.use(requestLogger);
-
+app.set("trust proxy", 1); // for render
 app.use(express.json());
 
 app.use(helmet());
@@ -32,6 +33,8 @@ app.use(cors());
 //     credentials: true,
 //   }),
 // );
+startScheduler();
+
 app.use("/gmail", authLimiter, gmailRoutes);
 app.use("/campaign", campaignRoutes);
 
