@@ -69,11 +69,11 @@ export const createCalendarEvent = async (account, campaign, emails) => {
     await oauth2Client.getAccessToken();
 
     const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-
+    const descriptionHtml = campaign.description ?? "";
     const event = {
       summary: campaign.event_title,
       location: campaign.meeting_link,
-      description: campaign.description,
+      description: descriptionHtml,
       start: {
         dateTime: campaign.start_time,
         timeZone: campaign.timezone,
