@@ -2,7 +2,6 @@ import { google } from "googleapis";
 import { supabase } from "../lib/supabase.js";
 import { encrypt, decrypt } from "../lib/crypto.js";
 import logger from "../lib/logger.js";
-import { marked } from "marked";
 export const createCalendarEvent = async (account, campaign, emails) => {
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
@@ -70,59 +69,7 @@ export const createCalendarEvent = async (account, campaign, emails) => {
 
     const calendar = google.calendar({ version: "v3", auth: oauth2Client });
 
-    const calendarRenderer = {
-      heading(token) {
-        const text = this.parser.parseInline(token.tokens);
-        return `<b>${text}</b><br><br>`;
-      },
-      paragraph(token) {
-        const text = this.parser.parseInline(token.tokens);
-        return `${text}<br><br>`;
-      },
-      strong(token) {
-        const text = this.parser.parseInline(token.tokens);
-        return `<b>${text}</b>`;
-      },
-      em(token) {
-        const text = this.parser.parseInline(token.tokens);
-        return `<i>${text}</i>`;
-      },
-      list(token) {
-        return token.items
-          .map((item) => `• ${this.parser.parseInline(item.tokens)}<br>`)
-          .join("");
-      },
-      link(token) {
-        const text = this.parser.parseInline(token.tokens);
-        return `<a href="${token.href}">${text}</a>`;
-      },
-      table(token) {
-        // Flatten table rows to plain lines: "Header: Cell, Header: Cell"
-        const rows = token.rows
-          .map((row) =>
-            row.map((cell) => this.parser.parseInline(cell.tokens)).join(": "),
-          )
-          .join("<br>");
-        return `${rows}<br><br>`;
-      },
-      hr() {
-        return `<br>—<br>`;
-      },
-      br() {
-        return `<br>`;
-      },
-      codespan(token) {
-        return token.text;
-      },
-      code(token) {
-        return token.text;
-      },
-    };
-
-    marked.use({ renderer: calendarRenderer, breaks: true });
-    const descriptionHtml = campaign.description
-      ? marked.parse(campaign.description)
-      : "";
+    const descriptionHtml = campaign.description ?? "";
     const event = {
       summary: campaign.event_title,
       location: campaign.meeting_link,
