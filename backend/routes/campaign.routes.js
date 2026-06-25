@@ -7,11 +7,13 @@ import {
   getCampaigns,
   getCampaignRecipients,
   getCampaignById,
+  getCampaignStats,
 } from "../controllers/campaign.controller.js";
 import { requireAuth } from "../middleware/auth.js";
 const router = express.Router();
 
 router.get("/", requireAuth, getCampaigns);
+router.get("/:id/stats", requireAuth, getCampaignStats);
 router.get("/:id/recipients", requireAuth, getCampaignRecipients);
 router.get("/:id", requireAuth, getCampaignById);
 
