@@ -7,26 +7,18 @@ export const getCampaignStats = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data, error } = await supabase
-      .from("recipients")
-      .select("status")
-      .eq("campaign_id", id);
+    const { data, error } = await supabase.rpc("get_campaign_stats", {
+      p_campaign_id: id,
+    });
 
     if (error) return res.status(500).json({ error: error.message });
 
-    const stats = data.reduce((acc, r) => {
-      acc[r.status] = (acc[r.status] || 0) + 1;
-      return acc;
-    }, {});
-
-    return res.json({
-      total: data.length,
-      invited: stats.invited || 0,
-      pending: stats.pending || 0,
-      processing: stats.processing || 0,
-      failed: stats.failed || 0,
-    });
+    return res.json(data);
   } catch (err) {
+    logger.error(
+      { err, campaignId: req.params.id },
+      "Unhandled error in getCampaignStats",
+    );
     return res.status(500).json({ error: "Internal server error" });
   }
 };
@@ -70,14 +62,9 @@ export const getCampaigns = async (req, res) => {
     return res.json(data);
   } catch (err) {
     logger.error(
-      {
-        err,
-        userId: user_id,
-      },
+      { err, userId: req.user?.id },
       "Unhandled error in getCampaigns",
     );
-    // console.error("Get Campaigns Error:", err);
-
     return res.status(500).json({ error: "Internal server error" });
   }
 };
@@ -319,24 +306,33 @@ export const startCampaign = async (req, res) => {
 
     if (!id || !user_id) {
       logger.warn(
-        {
-          campaignId: id,
-          userId: user_id,
-        },
+        { campaignId: id, userId: user_id },
         "Missing campaign id or user_id in startCampaign",
       );
-      return res.status(400).json({
-        error: "campaign id and user_id are required",
-      });
+      return res
+        .status(400)
+        .json({ error: "campaign id and user_id are required" });
     }
 
     const { data: campaign, error: updateError } = await supabase
       .from("campaigns")
       .update({ status: "running" })
       .eq("id", id)
-      // .eq("status", "draft") // Atomic check: only update if it was a draft
+      // .eq("status", "draft")
       .select()
       .single();
+
+    // if (campaign.status === "running") {
+    //   return res.status(400).json({ error: "Campaign already running" });
+    // }
+
+    if (updateError) {
+      logger.error(
+        { err: updateError, campaignId: id, userId: user_id },
+        "Failed to update campaign status to running",
+      );
+      return res.status(500).json({ error: updateError.message });
+    }
 
     if (!campaign) {
       logger.warn(
@@ -346,22 +342,6 @@ export const startCampaign = async (req, res) => {
       return res
         .status(404)
         .json({ error: "Campaign not found or already running" });
-    }
-
-    // if (campaign.status === "running") {
-    //   return res.status(400).json({ error: "Campaign already running" });
-    // }
-
-    if (updateError) {
-      logger.error(
-        {
-          err: updateError,
-          campaignId: id,
-          userId: user_id,
-        },
-        "Failed to update campaign status to running",
-      );
-      return res.status(500).json({ error: updateError.message });
     }
 
     logger.info(

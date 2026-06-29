@@ -2,7 +2,7 @@ import "../config.js";
 import { supabase } from "../lib/supabase.js";
 import { createCalendarEvent } from "../services/sender.service.js";
 import { connection } from "../lib/queue.js";
-import { tryCatch, Worker } from "bullmq";
+import { Worker } from "bullmq";
 import logger from "../lib/logger.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -42,8 +42,8 @@ const worker = new Worker(
       .select(
         `
       *,
-      campaign:campaign_id (*),
-      account:gmail_account_id (*),
+      campaign:campaign_id (id, status, start_time, end_time, timezone, event_title, meeting_link, description),
+      account:gmail_account_id (id, email, status, refresh_token, access_token, expiry_date),
       recipients:batch_recipients (
         recipient_id,
         recipients ( email )
@@ -133,16 +133,14 @@ const worker = new Worker(
         // Note: In this rare case, the email was sent but DB didn't update.
         // The account will likely be paused by the next scheduler loop.
       }
-      // console.log(
-      //   `✅ Successfully processed batch ${batch_id} for ${account.email}`,
-      // );
+
       logger.info(
         { batchId: batch_id, email: account.email, count: emails.length },
         "Batch processed successfully",
       );
     } catch (err) {
       if (isRetryableError(err)) {
-        throw err; // retry via BullMQ
+        throw err; // BullMQ will retry
       }
 
       const isAuthError =
@@ -152,10 +150,7 @@ const worker = new Worker(
       if (isAuthError) {
         await supabase
           .from("recipients")
-          .update({
-            status: "pending",
-            assigned_gmail_account_id: null,
-          })
+          .update({ status: "pending", assigned_gmail_account_id: null })
           .in("id", recipient_ids);
 
         await supabase
@@ -163,42 +158,45 @@ const worker = new Worker(
           .update({ status: "needs_reauth" })
           .eq("id", account.id);
 
-        // console.warn(`🔴 Account ${account.email} blocked due to auth error`);
         logger.error(
           { batchId: batch_id, accountId: account.id, email: account.email },
           "Auth error — account marked needs_reauth",
         );
-      } else {
-        //  Permanent failure (bad emails, invalid request, etc.)
-        const status = err.response?.status || err.code;
-        const googleReason = err.response?.data?.error?.errors?.[0]?.reason;
-        const customErrorMsg = `${status} - ${googleReason || err.message}`;
 
+        //  mark the batch failed so it doesn't stay stuck in 'pending'
         await supabase
-          .from("recipients")
-          .update({
-            status: "failed",
-            error: customErrorMsg,
-          })
-          .in("id", recipient_ids);
+          .from("event_batches")
+          .update({ status: "failed" })
+          .eq("id", batch_id);
 
-        // BLOCK that sender mail ???
-        await supabase
-          .from("gmail_accounts")
-          .update({ status: "blocked" })
-          .eq("id", account.id);
-        // console.warn(`❌ Permanent failure for batch ${batch_id}`);
-        logger.error(
-          { batchId: batch_id, status, googleReason, msg: err.message },
-          "Permanent batch failure",
-        );
+        return; // don't rethrow — no point retrying auth errors
       }
 
-      // mark batch failed
+      // Permanent failure
+      const status = err.response?.status || err.code;
+      const googleReason = err.response?.data?.error?.errors?.[0]?.reason;
+      const customErrorMsg = `${status} - ${googleReason || err.message}`;
+
+      await supabase
+        .from("recipients")
+        .update({ status: "failed", error: customErrorMsg })
+        .in("id", recipient_ids);
+
+      await supabase
+        .from("gmail_accounts")
+        .update({ status: "blocked" })
+        .eq("id", account.id);
+
+      // also mark batch failed here, before the outer block does it
       await supabase
         .from("event_batches")
         .update({ status: "failed" })
         .eq("id", batch_id);
+
+      logger.error(
+        { batchId: batch_id, status, googleReason, msg: err.message },
+        "Permanent batch failure",
+      );
     }
   },
   { connection },
@@ -213,7 +211,7 @@ worker.on("error", (err) => {
 
 worker.on("failed", async (job, err) => {
   // console.error(
-  //   `❌ Job ${job.id} permanently failed after all retries:`,
+  //   `Job ${job.id} permanently failed after all retries:`,
   //   err.message,
   // );
 
@@ -229,7 +227,7 @@ worker.on("failed", async (job, err) => {
   });
 
   if (error) {
-    // console.error("❌ CRITICAL: cleanup_failed_batch also failed:", error);
+    // console.error("CRITICAL: cleanup_failed_batch also failed:", error);
     logger.error(
       { err: error },
       " CRITICAL: cleanup_failed_batch also failed:",

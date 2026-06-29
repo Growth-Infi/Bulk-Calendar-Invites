@@ -107,7 +107,7 @@ export const assignRecipients = async (campaign_id, user_id) => {
 
       const { error: upsertError } = await supabase
         .from("recipients")
-        .upsert(chunk, { onConflict: "id" });
+        .upsert(chunk, { onConflict: "id", returning: "minimal" });
 
       if (upsertError) {
         logger.error(

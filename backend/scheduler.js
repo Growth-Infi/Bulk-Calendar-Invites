@@ -45,7 +45,9 @@ export const startScheduler = async () => {
       }
       const { data: accounts, error } = await supabase
         .from("gmail_accounts")
-        .select("*")
+        .select(
+          "id, email, status, sent_today, daily_limit, next_send_at, window_start",
+        )
         .eq("status", "active")
         .or(
           `next_send_at.is.null,next_send_at.lte.${new Date().toISOString()}`,
@@ -83,12 +85,12 @@ export const startScheduler = async () => {
         } else {
           const { data: fallback } = await supabase
             .from("recipients")
-            .select("campaign_id")
+            .select("campaign_id, campaigns!inner(status)")
             .is("assigned_gmail_account_id", null)
             .eq("status", "pending")
+            .eq("campaigns.status", "running")
             .limit(1)
             .maybeSingle();
-
           if (!fallback) continue;
 
           campaignId = fallback.campaign_id;
@@ -114,19 +116,17 @@ export const startScheduler = async () => {
         if (unassigned?.length) {
           const ids = unassigned.map((r) => r.id);
 
+          // Only update rows that are still unassigned
           await supabase
             .from("recipients")
-            .is("assigned_gmail_account_id", null)
             .update({ assigned_gmail_account_id: account.id })
-            .in("id", ids);
+            .in("id", ids)
+            .is("assigned_gmail_account_id", null);
 
           logger.info(
             { count: ids.length, account: account.email },
-            "Reassigned null recipients to the account email",
+            `Reassigned ${ids.length} recipients to ${account.email}`,
           );
-          // console.log(
-          //   `♻️ Reassigned ${ids.length} recipients to ${account.email}`,
-          // );
         }
 
         const remainingLimit = account.daily_limit - account.sent_today;
@@ -239,7 +239,7 @@ export const startScheduler = async () => {
       // console.error("Scheduler error:", error);
     }
 
-    await sleep(5000);
+    await sleep(45000);
   }
 };
 
