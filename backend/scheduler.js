@@ -243,4 +243,4 @@ export const startScheduler = async () => {
   }
 };
 
-// startScheduler();
+startScheduler();

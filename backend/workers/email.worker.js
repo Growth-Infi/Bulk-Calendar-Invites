@@ -82,11 +82,11 @@ const worker = new Worker(
       // console.warn(
       //   `🛑 Account ${account?.email} is ${account?.status}. Marking batch as failed and exiting.`,
       // );
+
       logger.info(
-        { batchId: batch_id, account: account.email },
+        { batchId: batch_id, account: account?.email },
         "Batch skipped — Sender Account paused",
       );
-
       await supabase
         .from("event_batches")
         .update({ status: "cancelled" })
@@ -127,7 +127,12 @@ const worker = new Worker(
         // console.error(`❌ Batch ${batch_id} rejected by DB: Limit exceeded.`);
 
         logger.error(
-          { batchId: batch_id, email: account.email, count: emails.length },
+          {
+            err: rpcError,
+            batchId: batch_id,
+            email: account.email,
+            count: emails.length,
+          },
           " RPC call - complete_email_batch, Batch rejected by DB: Limit exceeded.",
         );
         // Note: In this rare case, the email was sent but DB didn't update.
@@ -159,7 +164,12 @@ const worker = new Worker(
           .eq("id", account.id);
 
         logger.error(
-          { batchId: batch_id, accountId: account.id, email: account.email },
+          {
+            err: isAuthError,
+            batchId: batch_id,
+            accountId: account.id,
+            email: account.email,
+          },
           "Auth error — account marked needs_reauth",
         );
 
@@ -194,7 +204,7 @@ const worker = new Worker(
         .eq("id", batch_id);
 
       logger.error(
-        { batchId: batch_id, status, googleReason, msg: err.message },
+        { err, batchId: batch_id, status, googleReason, msg: err.message },
         "Permanent batch failure",
       );
     }
@@ -210,13 +220,8 @@ worker.on("error", (err) => {
 });
 
 worker.on("failed", async (job, err) => {
-  // console.error(
-  //   `Job ${job.id} permanently failed after all retries:`,
-  //   err.message,
-  // );
-
   logger.error(
-    { jobId: job.id, batchId: job.data.batch_id, err: err.message },
+    { jobId: job.id, batchId: job.data.batch_id, err: err },
     "Job permanently failed after all retries",
   );
 

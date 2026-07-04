@@ -4,40 +4,44 @@ services:
     command: node server.js
     ports:
       - "5000:5000"
-    env_file:
-      - .env
+    environment:
+      - SERVICE_NAME=api
+    env_file: .env
     volumes:
-      - .:/app
-      - /app/node_modules
-      - ./logs:/app/logs
+      - /home/deploy/growthinfi/bulk-calendarInvites/logs:/app/logs
+    restart: unless-stopped
     depends_on:
       - redis
 
   scheduler:
     build: .
     command: node scheduler.js
-    env_file:
-      - .env
+    environment:
+      - SERVICE_NAME=scheduler
+    env_file: .env
     volumes:
-      - .:/app
-      - /app/node_modules
-      - ./logs:/app/logs
+      - /home/deploy/growthinfi/bulk-calendarInvites/logs:/app/logs
+    restart: unless-stopped
     depends_on:
       - redis
 
   worker:
     build: .
     command: node workers/email.worker.js
-    env_file:
-      - .env
+    env_file: .env
+    environment:
+      - SERVICE_NAME=worker
     volumes:
-      - .:/app
-      - /app/node_modules
-      - ./logs:/app/logs
+      - /home/deploy/growthinfi/bulk-calendarInvites/logs:/app/logs
+    restart: unless-stopped
     depends_on:
       - redis
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:

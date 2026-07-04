@@ -318,7 +318,7 @@ export const startCampaign = async (req, res) => {
       .from("campaigns")
       .update({ status: "running" })
       .eq("id", id)
-      // .eq("status", "draft")
+      .eq("status", "draft")
       .select()
       .single();
 

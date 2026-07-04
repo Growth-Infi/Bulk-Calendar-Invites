@@ -60,7 +60,9 @@ export const assignRecipients = async (campaign_id, user_id) => {
     const { data: recipients, error: recError } = await supabase
       .from("recipients")
       .select("id,email")
-      .eq("campaign_id", campaign_id);
+      .eq("campaign_id", campaign_id)
+      .eq("status", "pending")
+      .is("assigned_gmail_account_id", null);
 
     if (recError) {
       logger.error(
