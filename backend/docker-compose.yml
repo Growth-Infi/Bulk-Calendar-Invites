@@ -3,7 +3,7 @@ services:
     build: .
     command: node server.js
     ports:
-      - "5000:5000"
+      - "5001:5000"
     environment:
       - SERVICE_NAME=api
     env_file: .env
