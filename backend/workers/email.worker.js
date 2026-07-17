@@ -187,6 +187,32 @@ const worker = new Worker(
       const googleReason = err.response?.data?.error?.errors?.[0]?.reason;
       const customErrorMsg = `${status} - ${googleReason || err.message}`;
 
+      // BETTER ERROR HANDLING
+      // const accountFaultReasons = [
+      //   "authError",
+      //   "accountDeleted",
+      //   "domainPolicy",
+      //   "insufficientPermissions",
+      // ];
+      // const shouldBlockAccount = accountFaultReasons.includes(googleReason);
+
+      // await supabase
+      //   .from("recipients")
+      //   .update({ status: "failed", error: customErrorMsg })
+      //   .in("id", recipient_ids);
+
+      // if (shouldBlockAccount) {
+      //   await supabase
+      //     .from("gmail_accounts")
+      //     .update({ status: "blocked" })
+      //     .eq("id", account.id);
+      // } else {
+      //   logger.warn(
+      //     { batchId: batch_id, googleReason },
+      //     "Batch failed for non-account reason — sender left active",
+      //   );
+      // }
+
       await supabase
         .from("recipients")
         .update({ status: "failed", error: customErrorMsg })

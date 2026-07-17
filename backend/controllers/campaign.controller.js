@@ -209,6 +209,12 @@ export const createCampaign = async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    if (new Date(end_time) <= new Date(start_time)) {
+      return res
+        .status(400)
+        .json({ error: "end_time must be after start_time" });
+    }
+
     const { data: campaign, error } = await supabase
       .from("campaigns")
       .insert([
